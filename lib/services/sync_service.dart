@@ -112,28 +112,36 @@ class SyncService {
     final relativePath = path.relative(sourcePath, from: sourceDir);
     final targetPath = path.join(destinationPath, relativePath);
 
+    print('[SYNC] Detected file event: ${event.type} on $sourcePath');
+
     try {
       switch (event.type) {
         case ChangeType.ADD:
         case ChangeType.MODIFY:
           await _copyFileWithRetry(sourcePath, targetPath);
+          print('[SYNC] Local copy done: $sourcePath -> $targetPath');
           if (discovery != null) {
+            print('[SYNC] Sending file change to connected devices...');
             await discovery!.sendFileChange(
               action: event.type == ChangeType.ADD ? 'add' : 'modify',
               folderName: destinationPath,
               relativePath: relativePath,
               filePath: sourcePath,
             );
+            print('[SYNC] File change sent.');
           }
           break;
         case ChangeType.REMOVE:
           await _deleteFileWithRetry(targetPath);
+          print('[SYNC] Local delete done: $targetPath');
           if (discovery != null) {
+            print('[SYNC] Sending delete command to connected devices...');
             await discovery!.sendFileChange(
               action: 'delete',
               folderName: destinationPath,
               relativePath: relativePath,
             );
+            print('[SYNC] Delete command sent.');
           }
           break;
       }

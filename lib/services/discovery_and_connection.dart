@@ -143,6 +143,7 @@ class DiscoveryAndConnection {
           await file.parent.create(recursive: true);
           final sink = file.openWrite();
           int received = 0;
+          print('[TCP SERVER] Receiving file: $filePath ($fileSize bytes)');
           await for (final chunk in stream) {
             sink.add(chunk);
             received += chunk.length;
@@ -155,6 +156,8 @@ class DiscoveryAndConnection {
           if (await file.exists()) {
             await file.delete();
             print('[TCP SERVER] File deleted: $filePath');
+          } else {
+            print('[TCP SERVER] File to delete not found: $filePath');
           }
         }
       }

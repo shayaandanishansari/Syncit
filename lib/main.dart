@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 void main() {
+  // Ensure SyncService is always wired to DiscoveryAndConnection
+  SyncService().discovery = DiscoveryAndConnection();
   runApp(const SyncItApp());
 }
 
@@ -282,7 +284,7 @@ class _DevicesPageState extends State<DevicesPage> {
                           if (!mounted) return;
                           setState(() {}); // Update connected devices
                           Navigator.pop(context); // Close progress dialog
-                          Navigator.pop(context); // Close discovery dialog
+                          Navigator.pop(context); // Close connection dialog
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('Connected to ${device.key}'),
