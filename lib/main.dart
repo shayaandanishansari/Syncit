@@ -201,76 +201,17 @@ class DevicesPage extends StatefulWidget {
 class _DevicesPageState extends State<DevicesPage> {
   final DiscoveryAndConnection _discovery = DiscoveryAndConnection();
   bool _isDiscovering = false;
-  String? _currentPin; // For showing PIN on server
-  BuildContext? _pinDialogContext; // To close PIN dialog programmatically
 
   @override
   void initState() {
     super.initState();
-    // Show PIN dialog on server when pairing is requested
-    _discovery.onShowPin = (pin) {
-      setState(() {
-        _currentPin = pin;
-      });
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          _pinDialogContext = dialogContext;
-          return AlertDialog(
-            title: const Text('Pairing Request'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Enter this PIN on the other device:'),
-                const SizedBox(height: 16),
-                Text(pin, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  setState(() {
-                    _currentPin = null;
-                  });
-                },
-                child: const Text('Close'),
-              ),
-            ],
-          );
-        },
-      );
-    };
-    // Show pairing result on client
-    _discovery.onPairingResult = (success, message) {
-      // Auto-close PIN dialog on server
-      if (_pinDialogContext != null) {
-        Navigator.pop(_pinDialogContext!);
-        _pinDialogContext = null;
-        setState(() {
-          _currentPin = null;
-        });
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
-      );
-      // After pairing, stop UDP and update UI
-      _discovery.StopBCast();
-      setState(() {
-        _isDiscovering = false;
-      });
-    };
-    // Start the pairing server
-    _discovery.startPairingServer();
+    // Start the file sharing server
+    _discovery.startTCPServer();
   }
 
-  void _removePairedDevice(String deviceName) {
+  void _removeConnectedDevice(String deviceName) {
     setState(() {
-      _discovery.PairedDevices.remove(deviceName);
+      _discovery.ConnectedDevices.remove(deviceName);
     });
   }
 
@@ -278,33 +219,6 @@ class _DevicesPageState extends State<DevicesPage> {
   void dispose() {
     _discovery.StopBCast();
     super.dispose();
-  }
-
-  Future<String> _promptForPinDialog() async {
-    String enteredPin = '';
-    return await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Enter PIN'),
-        content: TextField(
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          maxLength: 6,
-          onChanged: (value) => enteredPin = value,
-          decoration: const InputDecoration(
-            labelText: 'PIN',
-            hintText: 'Enter the PIN from the other device',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, enteredPin),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    ) ?? '';
   }
 
   Future<void> _startDiscovery() async {
@@ -350,26 +264,37 @@ class _DevicesPageState extends State<DevicesPage> {
                               children: [
                                 CircularProgressIndicator(),
                                 SizedBox(width: 16),
-                                Text('Pairing...'),
+                                Text('Connecting...'),
                               ],
                             ),
                           ),
                         );
                         try {
-                          await _discovery.Pairing(device.key, _promptForPinDialog);
+                          await _discovery.connectToDevice(device.key);
                           if (!mounted) return;
-                          setState(() {}); // Update paired devices
+                          setState(() {}); // Update connected devices
                           Navigator.pop(context); // Close progress dialog
                           Navigator.pop(context); // Close discovery dialog
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Connected to ${device.key}'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
                         } catch (e) {
                           if (!mounted) return;
                           Navigator.pop(context); // Close progress dialog
-                          // Also stop UDP and update UI on error
-                          _discovery.StopBCast();
-                          setState(() {
-                            _isDiscovering = false;
-                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Connection failed: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
                         }
+                        _discovery.StopBCast();
+                        setState(() {
+                          _isDiscovering = false;
+                        });
                       },
                     );
                   },
@@ -411,7 +336,7 @@ class _DevicesPageState extends State<DevicesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final pairedDevices = _discovery.PairedDevices.entries.toList();
+    final connectedDevices = _discovery.ConnectedDevices.entries.toList();
     final discovered = _discovery.DiscoveredDevices;
     return Scaffold(
       appBar: AppBar(
@@ -420,16 +345,16 @@ class _DevicesPageState extends State<DevicesPage> {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       drawer: const AppDrawer(),
-      body: pairedDevices.isEmpty
+      body: connectedDevices.isEmpty
           ? Center(
               child: _isDiscovering
                   ? const CircularProgressIndicator()
                   : const Text('No devices added. Click the + button to add one'),
             )
           : ListView.builder(
-              itemCount: pairedDevices.length,
+              itemCount: connectedDevices.length,
               itemBuilder: (context, index) {
-                final entry = pairedDevices[index];
+                final entry = connectedDevices[index];
                 final name = entry.key;
                 final ip = entry.value[0];
                 final online = discovered.containsValue(ip);
@@ -446,7 +371,7 @@ class _DevicesPageState extends State<DevicesPage> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _removePairedDevice(name),
+                        onPressed: () => _removeConnectedDevice(name),
                       ),
                     ],
                   ),
