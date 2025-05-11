@@ -202,6 +202,7 @@ class _DevicesPageState extends State<DevicesPage> {
   final DiscoveryAndConnection _discovery = DiscoveryAndConnection();
   bool _isDiscovering = false;
   String? _currentPin; // For showing PIN on server
+  BuildContext? _pinDialogContext; // To close PIN dialog programmatically
 
   @override
   void initState() {
@@ -214,38 +215,54 @@ class _DevicesPageState extends State<DevicesPage> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Text('Pairing Request'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Enter this PIN on the other device:'),
-              const SizedBox(height: 16),
-              Text(pin, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                setState(() {
-                  _currentPin = null;
-                });
-              },
-              child: const Text('Close'),
+        builder: (dialogContext) {
+          _pinDialogContext = dialogContext;
+          return AlertDialog(
+            title: const Text('Pairing Request'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Enter this PIN on the other device:'),
+                const SizedBox(height: 16),
+                Text(pin, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+              ],
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  setState(() {
+                    _currentPin = null;
+                  });
+                },
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
       );
     };
     // Show pairing result on client
     _discovery.onPairingResult = (success, message) {
+      // Auto-close PIN dialog on server
+      if (_pinDialogContext != null) {
+        Navigator.pop(_pinDialogContext!);
+        _pinDialogContext = null;
+        setState(() {
+          _currentPin = null;
+        });
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
+      // After pairing, stop UDP and update UI
+      _discovery.StopBCast();
+      setState(() {
+        _isDiscovering = false;
+      });
     };
     // Start the pairing server
     _discovery.startPairingServer();
@@ -347,6 +364,11 @@ class _DevicesPageState extends State<DevicesPage> {
                         } catch (e) {
                           if (!mounted) return;
                           Navigator.pop(context); // Close progress dialog
+                          // Also stop UDP and update UI on error
+                          _discovery.StopBCast();
+                          setState(() {
+                            _isDiscovering = false;
+                          });
                         }
                       },
                     );
