@@ -19,6 +19,9 @@ class DiscoveryAndConnection {
   Socket? tcpSocket; // Continuous connection for file sharing
   ServerSocket? tcpServer;
 
+  // Callback to notify UI when a device connects
+  void Function()? onDeviceConnected;
+
   Future<String> getWifiIP() async {
     final interfaces = await NetworkInterface.list(
       includeLoopback: false,
@@ -109,6 +112,7 @@ class DiscoveryAndConnection {
       if (!ConnectedDevices.containsKey(deviceName)) {
         ConnectedDevices[deviceName!] = [client.remoteAddress.address];
         print('[TCP SERVER] Added $deviceName to ConnectedDevices');
+        onDeviceConnected?.call();
       }
       // You can now use 'client' to receive files
     });

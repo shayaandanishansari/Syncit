@@ -207,6 +207,10 @@ class _DevicesPageState extends State<DevicesPage> {
     super.initState();
     // Start the file sharing server
     _discovery.startTCPServer();
+    // Refresh UI when a device connects
+    _discovery.onDeviceConnected = () {
+      if (mounted) setState(() {});
+    };
   }
 
   void _removeConnectedDevice(String deviceName) {
