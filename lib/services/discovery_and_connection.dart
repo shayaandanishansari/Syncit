@@ -5,7 +5,7 @@ import 'dart:math';
 
 class DiscoveryAndConnection {
   final int port = 1234;
-  final int tcpPort = 1235;
+  final int tcpPort = 1235; // For continuous file sharing
   final int pairingPort = 1236;
 
   late String deviceIp;
@@ -17,7 +17,7 @@ class DiscoveryAndConnection {
 
   RawDatagramSocket? udp_socket;
   Timer? _timer;
-  Socket? tcpSocket;
+  Socket? tcpSocket; // Continuous connection for file sharing
   ServerSocket? tcpServer;
   ServerSocket? pairingServer;
 
@@ -128,7 +128,7 @@ class DiscoveryAndConnection {
     });
   }
 
-  // Pairing via TCP with PIN entry
+  // Pairing via TCP with PIN entry and line-based protocol
   Future<void> Pairing(String deviceID, Future<String> Function() promptForPin) async {
     final remoteIp = DiscoveredDevices[deviceID];
     if (remoteIp == null) throw Exception('Device not found');
@@ -158,29 +158,29 @@ class DiscoveryAndConnection {
       PairedDevices[deviceID] = [remoteIp, pin];
       onPairingResult?.call(true, 'Pairing successful!');
       print('[TCP PAIRING] Pairing successful!');
+      // Establish a continuous TCP connection for file sharing
+      await establishFileSharingConnection(remoteIp);
     } else {
       onPairingResult?.call(false, 'Pairing failed: wrong PIN');
-      print('[TCP PAIRING] Pairing failed: wrong PIN');
-      // Fallback: try direct TCP connection
-      await SwitchToTCPConnection(deviceID);
+      throw Exception('Pairing failed: wrong PIN');
     }
   }
 
-  // Fallback: Direct TCP connection
-  Future<void> SwitchToTCPConnection(String deviceID) async {
-    final info = PairedDevices[deviceID] ?? [DiscoveredDevices[deviceID], ''];
-    final ip = info[0];
-    if (ip == null) throw Exception('No IP for device');
-    tcpSocket = await Socket.connect(ip, tcpPort);
-    print('[TCP CONNECT] Connected to $ip:$tcpPort');
+  // Establish a continuous TCP connection for file sharing
+  Future<void> establishFileSharingConnection(String remoteIp) async {
+    print('[FILE SHARING] Connecting to $remoteIp:$tcpPort');
+    tcpSocket = await Socket.connect(remoteIp, tcpPort);
+    print('[FILE SHARING] Connected to $remoteIp:$tcpPort');
+    // You can now use tcpSocket to send/receive files
   }
 
-  // (Optional) Start a general TCP server for further communication
+  // (Optional) Start a general TCP server for file sharing
   Future<void> startTCPServer() async {
     tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort);
     print('[TCP SERVER] Listening on 0.0.0.0:$tcpPort');
     tcpServer!.listen((client) {
       print('[TCP SERVER] New client: \\${client.remoteAddress.address}');
+      // You can now use 'client' to receive files
     });
   }
 }
