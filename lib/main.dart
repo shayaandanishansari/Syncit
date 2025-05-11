@@ -411,6 +411,12 @@ class _FoldersPageState extends State<FoldersPage> {
     _loadFolders();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadFolders();
+  }
+
   Future<void> _loadFolders() async {
     final prefs = await SharedPreferences.getInstance();
     final foldersJson = prefs.getString('shared_folders');

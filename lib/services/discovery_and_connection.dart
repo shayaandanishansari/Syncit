@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:path';
 
 class DiscoveryAndConnection {
   final int port = 1234;
@@ -97,7 +98,7 @@ class DiscoveryAndConnection {
 
   // Start a general TCP server for file sharing
   Future<void> startTCPServer() async {
-    tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort);
+    tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort, shared: true);
     print('[TCP SERVER] Listening on 0.0.0.0:$tcpPort');
     tcpServer!.listen((client) async {
       print('[TCP SERVER] New client: \\${client.remoteAddress.address}');
@@ -117,7 +118,41 @@ class DiscoveryAndConnection {
         onDeviceConnected?.call();
       }
       incomingSockets[deviceName!] = client;
-      // You can now use 'client' to receive files
+      // File receiving logic
+      final stream = client.asBroadcastStream();
+      final reader = utf8.decoder.bind(stream).transform(const LineSplitter());
+      await for (final header in reader) {
+        // Header: action|folderName|relativePath|size
+        final parts = header.split('|');
+        if (parts.length < 4) continue;
+        final action = parts[0];
+        final folderName = parts[1];
+        final relativePath = parts[2];
+        final fileSize = int.tryParse(parts[3]) ?? 0;
+        final baseDir = await _getOrCreateFolder(folderName);
+        final filePath = path.join(baseDir, relativePath);
+        print('[TCP SERVER] Received $action for $relativePath');
+        if (action == 'add' || action == 'modify') {
+          // Receive file bytes
+          final file = File(filePath);
+          await file.parent.create(recursive: true);
+          final sink = file.openWrite();
+          int received = 0;
+          await for (final chunk in stream) {
+            sink.add(chunk);
+            received += chunk.length;
+            if (received >= fileSize) break;
+          }
+          await sink.close();
+          print('[TCP SERVER] File written: $filePath');
+        } else if (action == 'delete') {
+          final file = File(filePath);
+          if (await file.exists()) {
+            await file.delete();
+            print('[TCP SERVER] File deleted: $filePath');
+          }
+        }
+      }
     });
   }
 
@@ -144,6 +179,16 @@ class DiscoveryAndConnection {
       await socket.flush();
       print('[FILE SHARING] Sent $action for $relativePath to ${entry.key}');
     }
+  }
+
+  // Helper to get or create a folder for received files
+  Future<String> _getOrCreateFolder(String folderName) async {
+    // For now, use a subfolder in the current directory
+    final dir = Directory(folderName);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir.path;
   }
 }
 
