@@ -5,6 +5,11 @@ import 'dart:math';
 import 'package:path/path.dart' as path;
 
 class DiscoveryAndConnection {
+  // Singleton pattern
+  static final DiscoveryAndConnection _instance = DiscoveryAndConnection._internal();
+  factory DiscoveryAndConnection() => _instance;
+  DiscoveryAndConnection._internal();
+
   final int port = 1234;
   final int tcpPort = 1235; // For continuous file sharing
 

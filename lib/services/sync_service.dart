@@ -21,6 +21,11 @@ class SyncError {
 }
 
 class SyncService {
+  // Singleton pattern
+  static final SyncService _instance = SyncService._internal();
+  factory SyncService() => _instance;
+  SyncService._internal();
+
   final Map<String, FileWatcher> _watchers = {};
   final Map<String, String> _syncPairs = {}; // source -> destination mapping
   final Map<String, SyncStatus> _syncStatus = {};

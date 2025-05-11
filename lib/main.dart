@@ -402,12 +402,11 @@ class FoldersPage extends StatefulWidget {
 
 class _FoldersPageState extends State<FoldersPage> {
   final List<Map<String, String>> _folders = [];
-  late SyncService _syncService;
+  final SyncService _syncService = SyncService();
 
   @override
   void initState() {
     super.initState();
-    _syncService = SyncService();
     _loadFolders();
   }
 
