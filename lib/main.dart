@@ -7,6 +7,11 @@ import 'services/file_watcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'services/settings_service.dart';
+import 'pages/home_page.dart';
+import 'pages/devices_page.dart';
+import 'pages/folders_page.dart';
+import 'pages/settings_page.dart';
 
 void main() {
   // Ensure SyncService is always wired to DiscoveryAndConnection
@@ -19,20 +24,32 @@ class SyncItApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => SyncServiceNotifier(),
-      child: MaterialApp(
-        title: 'SyncIt',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.lightBlue),
-          useMaterial3: true,
-        ),
-        initialRoute: '/',
-        routes: {
-          '/': (context) => const HomePage(),
-          '/devices': (context) => const DevicesPage(),
-          '/folders': (context) => const FoldersPage(),
-          '/settings': (context) => const SettingsPage(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => SyncServiceNotifier()),
+        ChangeNotifierProvider(create: (_) => SettingsService()),
+      ],
+      child: Consumer<SettingsService>(
+        builder: (context, settings, _) {
+          return MaterialApp(
+            title: 'SyncIt',
+            theme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(seedColor: settings.ribbonColor),
+              scaffoldBackgroundColor: settings.backgroundColor,
+              textTheme: Theme.of(context).textTheme.apply(
+                bodyColor: settings.textColor,
+                displayColor: settings.textColor,
+              ),
+              useMaterial3: true,
+            ),
+            initialRoute: '/',
+            routes: {
+              '/': (context) => const HomePage(),
+              '/devices': (context) => const DevicesPage(),
+              '/folders': (context) => const FoldersPage(),
+              '/settings': (context) => const SettingsPage(),
+            },
+          );
         },
       ),
     );
@@ -44,11 +61,12 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settings = Provider.of<SettingsService>(context);
     return Drawer(
       child: Column(
         children: [
           DrawerHeader(
-            decoration: const BoxDecoration(color: Colors.lightBlue),
+            decoration: BoxDecoration(color: settings.ribbonColor),
             child: Align(
               alignment: Alignment.bottomLeft,
               child: Text(
@@ -83,20 +101,59 @@ class AppDrawer extends StatelessWidget {
   }
 }
 
-class HomePage extends StatelessWidget {
+class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final String title;
+  final bool showDrawer;
+
+  const CustomAppBar({
+    super.key,
+    required this.title,
+    this.showDrawer = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = Provider.of<SettingsService>(context);
+    return AppBar(
+      backgroundColor: settings.ribbonColor,
+      title: Text(title, style: const TextStyle(color: Colors.white)),
+      iconTheme: const IconThemeData(color: Colors.white),
+      automaticallyImplyLeading: showDrawer,
+    );
+  }
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+}
+
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final DiscoveryAndConnection _discovery = DiscoveryAndConnection();
+
+  @override
+  void initState() {
+    super.initState();
+    // Load settings when page opens
+    SettingsService().loadSettings();
+    // Start the file sharing server
+    _discovery.startTCPServer();
+  }
 
   @override
   Widget build(BuildContext context) {
     final syncService = Provider.of<SyncServiceNotifier>(context);
+    final settings = Provider.of<SettingsService>(context);
     final syncPairs = syncService.syncPairs.entries.toList();
+    final connectedDevices = _discovery.ConnectedDevices.entries.toList();
     
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.lightBlue,
-        title: const Text('Welcome Shayaan', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: const CustomAppBar(title: 'Welcome Shayaan'),
       drawer: const AppDrawer(),
       body: Padding(
         padding: const EdgeInsets.all(32.0),
@@ -105,42 +162,60 @@ class HomePage extends StatelessWidget {
           children: [
             Expanded(
               child: Card(
-                color: Colors.grey[200],
+                color: settings.backgroundColor,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Devices', style: TextStyle(fontSize: 32)),
+                      Text('Devices', 
+                        style: TextStyle(
+                          fontSize: 32,
+                          color: settings.textColor,
+                        ),
+                      ),
                       const SizedBox(height: 16),
-                      if (syncPairs.isEmpty)
-                        const Center(
+                      if (connectedDevices.isEmpty)
+                        Center(
                           child: Text('No devices connected yet.\nAdd a device to start syncing.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: settings.textColor.withOpacity(0.6),
+                            ),
                           ),
                         )
                       else
-                        ...syncPairs.map((pair) => Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(12),
-                        color: Colors.grey[400],
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
+                        ...connectedDevices.map((device) => Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(12),
+                          color: settings.ribbonColor.withOpacity(0.1),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(path.basename(pair.value), 
-                                    style: const TextStyle(fontSize: 20)),
-                                  Text(pair.value, 
-                                    style: const TextStyle(fontSize: 14)),
+                                  Text(device.key, 
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      color: settings.textColor,
+                                    ),
+                                  ),
+                                  Text(device.value[0], 
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: settings.textColor.withOpacity(0.7),
+                                    ),
+                                  ),
                                 ],
                               ),
-                            const Icon(Icons.check_circle, color: Colors.white54),
-                          ],
-                        ),
-                      )),
+                              Icon(Icons.computer, 
+                                color: settings.ribbonColor.withOpacity(0.7),
+                              ),
+                            ],
+                          ),
+                        )),
                     ],
                   ),
                 ),
@@ -149,42 +224,60 @@ class HomePage extends StatelessWidget {
             const SizedBox(width: 32),
             Expanded(
               child: Card(
-                color: Colors.grey[200],
+                color: settings.backgroundColor,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Folders', style: TextStyle(fontSize: 32)),
+                      Text('Folders', 
+                        style: TextStyle(
+                          fontSize: 32,
+                          color: settings.textColor,
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       if (syncPairs.isEmpty)
-                        const Center(
+                        Center(
                           child: Text('No folders shared yet.\nAdd a folder to start syncing.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: settings.textColor.withOpacity(0.6),
+                            ),
                           ),
                         )
                       else
                         ...syncPairs.map((pair) => Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(12),
-                        color: Colors.grey[400],
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(12),
+                          color: settings.ribbonColor.withOpacity(0.1),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Text(path.basename(pair.key), 
-                                    style: const TextStyle(fontSize: 20)),
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      color: settings.textColor,
+                                    ),
+                                  ),
                                   Text(pair.key, 
-                                    style: const TextStyle(fontSize: 14)),
-                              ],
-                            ),
-                            const Icon(Icons.folder_open, color: Colors.black54),
-                          ],
-                        ),
-                      )),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: settings.textColor.withOpacity(0.7),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Icon(Icons.folder_open, 
+                                color: settings.ribbonColor.withOpacity(0.7),
+                              ),
+                            ],
+                          ),
+                        )),
                     ],
                   ),
                 ),
@@ -269,11 +362,7 @@ class _DevicesPageState extends State<DevicesPage> {
     final discoveredDevices = _discovery.DiscoveredDevices.entries.toList();
     
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.lightBlue,
-        title: const Text('Devices', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: const CustomAppBar(title: 'Devices'),
       drawer: const AppDrawer(),
       body: Column(
         children: [
@@ -517,11 +606,7 @@ class _FoldersPageState extends State<FoldersPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.lightBlue,
-        title: const Text('Synced Folders', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: const CustomAppBar(title: 'Synced Folders'),
       drawer: const AppDrawer(),
       body: _folders.isEmpty
           ? const Center(
@@ -550,21 +635,239 @@ class _FoldersPageState extends State<FoldersPage> {
   }
 }
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late SettingsService _settings;
+
+  @override
+  void initState() {
+    super.initState();
+    _settings = SettingsService();
+    _settings.loadSettings();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.lightBlue,
-        title: const Text('Settings', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: const CustomAppBar(title: 'Settings'),
       drawer: const AppDrawer(),
-      body: const Center(
-        child: Text('Settings page (to be implemented)'),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          const Text('Appearance', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          
+          // Ribbon Color
+          ListTile(
+            title: const Text('Ribbon Color'),
+            subtitle: Container(
+              width: 100,
+              height: 30,
+              decoration: BoxDecoration(
+                color: _settings.ribbonColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.color_lens),
+              onPressed: () async {
+                final Color? picked = await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Pick a color'),
+                    content: SingleChildScrollView(
+                      child: ColorPicker(
+                        pickerColor: _settings.ribbonColor,
+                        onColorChanged: (color) {
+                          _settings.updateRibbonColor(color);
+                        },
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                );
+                if (picked != null) {
+                  _settings.updateRibbonColor(picked);
+                }
+              },
+            ),
+          ),
+          
+          // Background Color
+          ListTile(
+            title: const Text('Background Color'),
+            subtitle: Container(
+              width: 100,
+              height: 30,
+              decoration: BoxDecoration(
+                color: _settings.backgroundColor,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.grey),
+              ),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.color_lens),
+              onPressed: () async {
+                final Color? picked = await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Pick a color'),
+                    content: SingleChildScrollView(
+                      child: ColorPicker(
+                        pickerColor: _settings.backgroundColor,
+                        onColorChanged: (color) {
+                          _settings.updateBackgroundColor(color);
+                        },
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                );
+                if (picked != null) {
+                  _settings.updateBackgroundColor(picked);
+                }
+              },
+            ),
+          ),
+          
+          // Text Color
+          ListTile(
+            title: const Text('Text Color'),
+            subtitle: Container(
+              width: 100,
+              height: 30,
+              decoration: BoxDecoration(
+                color: _settings.textColor,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.grey),
+              ),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.color_lens),
+              onPressed: () async {
+                final Color? picked = await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Pick a color'),
+                    content: SingleChildScrollView(
+                      child: ColorPicker(
+                        pickerColor: _settings.textColor,
+                        onColorChanged: (color) {
+                          _settings.updateTextColor(color);
+                        },
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                );
+                if (picked != null) {
+                  _settings.updateTextColor(picked);
+                }
+              },
+            ),
+          ),
+          
+          const Divider(height: 32),
+          const Text('Sync Settings', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          
+          // Sync Toggle
+          SwitchListTile(
+            title: const Text('Enable Sync'),
+            subtitle: const Text('Toggle file synchronization'),
+            value: _settings.syncEnabled,
+            onChanged: (value) {
+              _settings.toggleSync(value);
+            },
+          ),
+        ],
       ),
+    );
+  }
+}
+
+// Simple color picker widget
+class ColorPicker extends StatelessWidget {
+  final Color pickerColor;
+  final ValueChanged<Color> onColorChanged;
+
+  const ColorPicker({
+    super.key,
+    required this.pickerColor,
+    required this.onColorChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        Colors.white,
+        Colors.black,
+        Colors.grey[100]!,
+        Colors.grey[200]!,
+        Colors.grey[300]!,
+        Colors.grey[400]!,
+        Colors.grey[500]!,
+        Colors.grey[600]!,
+        Colors.grey[700]!,
+        Colors.grey[800]!,
+        Colors.grey[900]!,
+        Colors.red,
+        Colors.pink,
+        Colors.purple,
+        Colors.deepPurple,
+        Colors.indigo,
+        Colors.blue,
+        Colors.lightBlue,
+        Colors.cyan,
+        Colors.teal,
+        Colors.green,
+        Colors.lightGreen,
+        Colors.lime,
+        Colors.yellow,
+        Colors.amber,
+        Colors.orange,
+        Colors.deepOrange,
+        Colors.brown,
+        Colors.blueGrey,
+      ].map((color) => GestureDetector(
+        onTap: () => onColorChanged(color),
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: color == Colors.white ? Colors.grey : (pickerColor == color ? Colors.white : Colors.grey),
+              width: pickerColor == color ? 3 : 1,
+            ),
+          ),
+        ),
+      )).toList(),
     );
   }
 }

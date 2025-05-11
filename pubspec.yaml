@@ -17,7 +17,7 @@ dependencies:
   path: ^1.8.3
   provider: ^6.1.1
   file_picker: ^6.1.1
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.5.3
   
 
 dev_dependencies:
