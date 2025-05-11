@@ -92,30 +92,31 @@ class DiscoveryAndConnection {
     pairingServer!.listen((client) async {
       print('[PAIRING SERVER] New pairing request from \\${client.remoteAddress.address}');
       try {
-        final data = await utf8.decoder.bind(client).first;
+        final lines = utf8.decoder.bind(client).transform(const LineSplitter());
+        final data = await lines.first;
         print('[PAIRING SERVER] Received: $data');
         if (data.startsWith('PAIR_REQ_')) {
           // Step 1: Generate and show PIN
           final pin = (Random().nextInt(900000) + 100000).toString();
           onShowPin?.call(pin); // Show PIN on server UI
-          client.write('PIN:$pin');
+          client.writeln('PIN:$pin');
           await client.flush();
           print('[PAIRING SERVER] Sent PIN: $pin');
 
           // Step 2: Wait for client to send back entered PIN
-          final entered = await utf8.decoder.bind(client).first;
+          final entered = await lines.first;
           print('[PAIRING SERVER] Received entered PIN: $entered');
           if (entered == pin) {
-            client.write('PAIR_OK');
+            client.writeln('PAIR_OK');
             await client.flush();
             print('[PAIRING SERVER] Pairing successful!');
           } else {
-            client.write('PAIR_FAIL');
+            client.writeln('PAIR_FAIL');
             await client.flush();
             print('[PAIRING SERVER] Pairing failed: wrong PIN');
           }
         } else {
-          client.write('PAIR_FAIL');
+          client.writeln('PAIR_FAIL');
           await client.flush();
           print('[PAIRING SERVER] Sent: PAIR_FAIL');
         }
@@ -133,10 +134,11 @@ class DiscoveryAndConnection {
     if (remoteIp == null) throw Exception('Device not found');
     print('[TCP PAIRING] Connecting to $remoteIp:$pairingPort');
     final socket = await Socket.connect(remoteIp, pairingPort).timeout(const Duration(seconds: 5));
-    socket.write('PAIR_REQ_');
+    socket.writeln('PAIR_REQ_');
     await socket.flush();
     print('[TCP PAIRING] Sent: PAIR_REQ_');
-    final resp = await utf8.decoder.bind(socket).first;
+    final lines = utf8.decoder.bind(socket).transform(const LineSplitter());
+    final resp = await lines.first;
     print('[TCP PAIRING] Received: $resp');
     if (!resp.startsWith('PIN:')) {
       await socket.close();
@@ -146,10 +148,10 @@ class DiscoveryAndConnection {
     final pin = resp.substring(4);
     // Prompt user to enter the PIN shown on the other device
     final enteredPin = await promptForPin();
-    socket.write(enteredPin);
+    socket.writeln(enteredPin);
     await socket.flush();
     print('[TCP PAIRING] Sent entered PIN: $enteredPin');
-    final result = await utf8.decoder.bind(socket).first;
+    final result = await lines.first;
     print('[TCP PAIRING] Received: $result');
     await socket.close();
     if (result == 'PAIR_OK') {
@@ -158,8 +160,19 @@ class DiscoveryAndConnection {
       print('[TCP PAIRING] Pairing successful!');
     } else {
       onPairingResult?.call(false, 'Pairing failed: wrong PIN');
-      throw Exception('Pairing failed: wrong PIN');
+      print('[TCP PAIRING] Pairing failed: wrong PIN');
+      // Fallback: try direct TCP connection
+      await SwitchToTCPConnection(deviceID);
     }
+  }
+
+  // Fallback: Direct TCP connection
+  Future<void> SwitchToTCPConnection(String deviceID) async {
+    final info = PairedDevices[deviceID] ?? [DiscoveredDevices[deviceID], ''];
+    final ip = info[0];
+    if (ip == null) throw Exception('No IP for device');
+    tcpSocket = await Socket.connect(ip, tcpPort);
+    print('[TCP CONNECT] Connected to $ip:$tcpPort');
   }
 
   // (Optional) Start a general TCP server for further communication
