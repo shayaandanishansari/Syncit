@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:watcher/watcher.dart' hide FileWatcher;
 import 'file_watcher.dart';
+import 'discovery_and_connection.dart';
 
 enum SyncStatus {
   idle,
@@ -30,6 +31,8 @@ class SyncService {
   void Function(String path, SyncStatus status)? onStatusChanged;
   void Function(SyncError error)? onError;
   void Function(String sourcePath, String destPath)? onSyncComplete;
+
+  DiscoveryAndConnection? discovery;
 
   void addSyncPair(String sourcePath, String destinationPath) {
     if (!_syncPairs.containsKey(sourcePath)) {
@@ -109,9 +112,24 @@ class SyncService {
         case ChangeType.ADD:
         case ChangeType.MODIFY:
           await _copyFileWithRetry(sourcePath, targetPath);
+          if (discovery != null) {
+            await discovery!.sendFileChange(
+              action: event.type == ChangeType.ADD ? 'add' : 'modify',
+              folderName: destinationPath,
+              relativePath: relativePath,
+              filePath: sourcePath,
+            );
+          }
           break;
         case ChangeType.REMOVE:
           await _deleteFileWithRetry(targetPath);
+          if (discovery != null) {
+            await discovery!.sendFileChange(
+              action: 'delete',
+              folderName: destinationPath,
+              relativePath: relativePath,
+            );
+          }
           break;
       }
       onSyncComplete?.call(sourcePath, targetPath);

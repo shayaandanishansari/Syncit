@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'services/sync_service.dart';
 import 'package:path/path.dart' as path;
 import 'services/discovery_and_connection.dart';
+import 'services/file_watcher.dart';
 
 void main() {
   runApp(const SyncItApp());
@@ -389,13 +390,82 @@ class _DevicesPageState extends State<DevicesPage> {
   }
 }
 
-class FoldersPage extends StatelessWidget {
+class FoldersPage extends StatefulWidget {
   const FoldersPage({super.key});
 
   @override
+  State<FoldersPage> createState() => _FoldersPageState();
+}
+
+class _FoldersPageState extends State<FoldersPage> {
+  final List<Map<String, String>> _folders = [];
+  late SyncService _syncService;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncService = SyncService();
+  }
+
+  void _addFolderDialog() async {
+    String folderName = '';
+    String folderPath = '';
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Shared Folder'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Shared Folder Name'),
+              onChanged: (value) => folderName = value,
+            ),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Local Folder Path'),
+              onChanged: (value) => folderPath = value,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              if (folderName.isNotEmpty && folderPath.isNotEmpty) {
+                setState(() {
+                  _folders.add({'name': folderName, 'path': folderPath});
+                  _syncService.addSyncPair(folderPath, folderName);
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Add'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _removeFolder(int index) {
+    setState(() {
+      final folder = _folders[index];
+      _syncService.removeSyncPair(folder['path'] ?? '');
+      _folders.removeAt(index);
+    });
+  }
+
+  @override
+  void dispose() {
+    _syncService.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final syncService = Provider.of<SyncServiceNotifier>(context);
-    final folders = syncService.syncPairs.entries.toList();
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.lightBlue,
@@ -403,38 +473,27 @@ class FoldersPage extends StatelessWidget {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       drawer: const AppDrawer(),
-      body: folders.isEmpty
+      body: _folders.isEmpty
           ? const Center(
               child: Text('No shared folders yet. Use the + button to add one.'),
             )
           : ListView.builder(
-              itemCount: folders.length,
+              itemCount: _folders.length,
               itemBuilder: (context, index) {
-                final entry = folders[index];
+                final folder = _folders[index];
                 return ListTile(
                   leading: const Icon(Icons.folder_open),
-                  title: Text(entry.key),
-                  subtitle: Text(entry.value),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.check_circle, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.cloud_done, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => syncService.removeSyncPair(entry.key),
-                      ),
-                    ],
+                  title: Text(folder['name'] ?? ''),
+                  subtitle: Text(folder['path'] ?? ''),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: () => _removeFolder(index),
                   ),
                 );
               },
             ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: Show add folder dialog
-        },
+        onPressed: _addFolderDialog,
         child: const Icon(Icons.add),
       ),
     );

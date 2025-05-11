@@ -16,7 +16,8 @@ class DiscoveryAndConnection {
 
   RawDatagramSocket? udp_socket;
   Timer? _timer;
-  Socket? tcpSocket; // Continuous connection for file sharing
+  final Map<String, Socket> outgoingSockets = {}; // deviceName -> Socket
+  final Map<String, Socket> incomingSockets = {}; // deviceName -> Socket
   ServerSocket? tcpServer;
 
   // Callback to notify UI when a device connects
@@ -87,9 +88,10 @@ class DiscoveryAndConnection {
     final remoteIp = DiscoveredDevices[deviceID];
     if (remoteIp == null) throw Exception('Device not found');
     print('[FILE SHARING] Connecting to $remoteIp:$tcpPort');
-    tcpSocket = await Socket.connect(remoteIp, tcpPort);
+    final socket = await Socket.connect(remoteIp, tcpPort);
     print('[FILE SHARING] Connected to $remoteIp:$tcpPort');
     ConnectedDevices[deviceID] = [remoteIp];
+    outgoingSockets[deviceID] = socket;
     // You can now use tcpSocket to send/receive files
   }
 
@@ -114,8 +116,34 @@ class DiscoveryAndConnection {
         print('[TCP SERVER] Added $deviceName to ConnectedDevices');
         onDeviceConnected?.call();
       }
+      incomingSockets[deviceName!] = client;
       // You can now use 'client' to receive files
     });
+  }
+
+  // Send file change to all connected devices
+  Future<void> sendFileChange({
+    required String action, // 'add', 'modify', 'delete'
+    required String folderName,
+    required String relativePath,
+    String? filePath,
+  }) async {
+    for (final entry in outgoingSockets.entries) {
+      final socket = entry.value;
+      // Send header: action|folderName|relativePath|size\n
+      int fileSize = 0;
+      if ((action == 'add' || action == 'modify') && filePath != null) {
+        fileSize = await File(filePath).length();
+      }
+      final header = '$action|$folderName|$relativePath|$fileSize\n';
+      socket.add(utf8.encode(header));
+      if ((action == 'add' || action == 'modify') && filePath != null) {
+        final file = File(filePath);
+        await socket.addStream(file.openRead());
+      }
+      await socket.flush();
+      print('[FILE SHARING] Sent $action for $relativePath to ${entry.key}');
+    }
   }
 }
 
