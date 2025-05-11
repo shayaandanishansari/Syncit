@@ -20,19 +20,16 @@ class DiscoveryAndConnection {
 
   final Map<String, List<String>> ConnectedDevices = {};
   final Map<String, String> DiscoveredDevices = {};
-  final Map<String, DateTime> _deviceLastSeen = {}; // Track when we last saw each device
 
   RawDatagramSocket? udp_socket;
-  Timer? _discoveryTimer;
-  Timer? _cleanupTimer;
+  Timer? _timer;
   final Map<String, Socket> outgoingSockets = {}; // deviceName -> Socket
   final Map<String, Socket> incomingSockets = {}; // deviceName -> Socket
   ServerSocket? tcpServer;
 
   // Callbacks to notify UI
   void Function()? onDeviceConnected;
-  void Function()? onDeviceDiscovered;
-  void Function()? onDeviceRemoved;
+  void Function()? onDeviceDiscovered;  // New callback for discovery
 
   Future<String> getWifiIP() async {
     final interfaces = await NetworkInterface.list(
@@ -50,84 +47,48 @@ class DiscoveryAndConnection {
   }
 
   Future<void> StartBCast() async {
-    // Stop any existing discovery
-    await StopBCast();
-    
     deviceIp = await getWifiIP();
     final parts = deviceIp.split('.');
     bcastIp = '${parts[0]}.${parts[1]}.${parts[2]}.255';
     deviceName = Platform.localHostname;
 
-    try {
-      udp_socket = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
+    udp_socket = await RawDatagramSocket.bind(
+      InternetAddress.anyIPv4,
+      port,
+    );
+    udp_socket!.broadcastEnabled = true;
+
+    udp_socket!.listen((event) {
+      if (event == RawSocketEvent.read) {
+        final dg = udp_socket!.receive();
+        if (dg == null) return;
+        final msg = utf8.decode(dg.data);
+        print('[UDP RECEIVED] from ${dg.address.address}: $msg');
+        if (!msg.startsWith('DISCOVERY_SYNCIT_')) return;
+        final p = msg.split('_');
+        final ip = p[2];
+        final name = p[3];
+        if (ip != deviceIp && !DiscoveredDevices.containsKey(name)) {
+          DiscoveredDevices[name] = ip;
+          print('[UDP] Added new device: $name ($ip)');
+          onDeviceDiscovered?.call();  // Notify UI of new device
+        }
+      }
+    });
+
+    _timer = Timer.periodic(Duration(seconds: 2), (_) {
+      final ping = 'DISCOVERY_SYNCIT_${deviceIp}_${deviceName}';
+      print('[UDP SENT] to $bcastIp: $ping');
+      udp_socket!.send(
+        utf8.encode(ping),
+        InternetAddress(bcastIp),
         port,
       );
-      udp_socket!.broadcastEnabled = true;
-
-      udp_socket!.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = udp_socket!.receive();
-          if (dg == null) return;
-          final msg = utf8.decode(dg.data);
-          print('[UDP RECEIVED] from ${dg.address.address}: $msg');
-          if (!msg.startsWith('DISCOVERY_SYNCIT_')) return;
-          final p = msg.split('_');
-          final ip = p[2];
-          final name = p[3];
-          if (ip != deviceIp) {
-            final isNewDevice = !DiscoveredDevices.containsKey(name);
-            DiscoveredDevices[name] = ip;
-            _deviceLastSeen[name] = DateTime.now();
-            print('[UDP] Device seen: $name ($ip)');
-            if (isNewDevice) {
-              onDeviceDiscovered?.call();
-            }
-          }
-        }
-      });
-
-      // Send discovery broadcasts every 2 seconds
-      _discoveryTimer = Timer.periodic(Duration(seconds: 2), (_) {
-        final ping = 'DISCOVERY_SYNCIT_${deviceIp}_${deviceName}';
-        print('[UDP SENT] to $bcastIp: $ping');
-        udp_socket!.send(
-          utf8.encode(ping),
-          InternetAddress(bcastIp),
-          port,
-        );
-      });
-
-      // Clean up stale devices every 5 seconds
-      _cleanupTimer = Timer.periodic(Duration(seconds: 5), (_) {
-        final now = DateTime.now();
-        final staleDevices = _deviceLastSeen.entries
-            .where((entry) => now.difference(entry.value).inSeconds > 10)
-            .map((e) => e.key)
-            .toList();
-
-        for (final device in staleDevices) {
-          if (!ConnectedDevices.containsKey(device)) {
-            print('[UDP] Removing stale device: $device');
-            DiscoveredDevices.remove(device);
-            _deviceLastSeen.remove(device);
-            onDeviceRemoved?.call();
-          }
-        }
-      });
-
-    } catch (e) {
-      print('[UDP] Error starting discovery: $e');
-      await StopBCast();
-      rethrow;
-    }
+    });
   }
 
   void StopBCast() {
-    _discoveryTimer?.cancel();
-    _discoveryTimer = null;
-    _cleanupTimer?.cancel();
-    _cleanupTimer = null;
+    _timer?.cancel();
     udp_socket?.close();
     udp_socket = null;
   }
@@ -155,20 +116,6 @@ class DiscoveryAndConnection {
     final ourInfo = 'CONNECT_${deviceIp}_${deviceName}\n';
     socket.add(utf8.encode(ourInfo));
     await socket.flush();
-    
-    // Notify UI
-    onDeviceConnected?.call();
-  }
-
-  void removeDevice(String deviceID) {
-    // Close and cleanup sockets
-    outgoingSockets[deviceID]?.close();
-    incomingSockets[deviceID]?.close();
-    outgoingSockets.remove(deviceID);
-    incomingSockets.remove(deviceID);
-    
-    // Remove from connected devices
-    ConnectedDevices.remove(deviceID);
     
     // Notify UI
     onDeviceConnected?.call();

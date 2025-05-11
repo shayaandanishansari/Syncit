@@ -122,12 +122,12 @@ class HomePage extends StatelessWidget {
                         )
                       else
                         ...syncPairs.map((pair) => Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.all(12),
-                          color: Colors.grey[400],
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(12),
+                        color: Colors.grey[400],
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -137,10 +137,10 @@ class HomePage extends StatelessWidget {
                                     style: const TextStyle(fontSize: 14)),
                                 ],
                               ),
-                              const Icon(Icons.check_circle, color: Colors.white54),
-                            ],
-                          ),
-                        )),
+                            const Icon(Icons.check_circle, color: Colors.white54),
+                          ],
+                        ),
+                      )),
                     ],
                   ),
                 ),
@@ -166,25 +166,25 @@ class HomePage extends StatelessWidget {
                         )
                       else
                         ...syncPairs.map((pair) => Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.all(12),
-                          color: Colors.grey[400],
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(12),
+                        color: Colors.grey[400],
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                   Text(path.basename(pair.key), 
                                     style: const TextStyle(fontSize: 20)),
                                   Text(pair.key, 
                                     style: const TextStyle(fontSize: 14)),
-                                ],
-                              ),
-                              const Icon(Icons.folder_open, color: Colors.black54),
-                            ],
-                          ),
-                        )),
+                              ],
+                            ),
+                            const Icon(Icons.folder_open, color: Colors.black54),
+                          ],
+                        ),
+                      )),
                     ],
                   ),
                 ),
@@ -215,20 +215,19 @@ class _DevicesPageState extends State<DevicesPage> {
     _discovery.startTCPServer();
     // Start discovery automatically
     _startDiscovery();
-    // Set up UI update callbacks
+    // Refresh UI when a device connects or is discovered
     _discovery.onDeviceConnected = () {
       if (mounted) setState(() {});
     };
     _discovery.onDeviceDiscovered = () {
       if (mounted) setState(() {});
     };
-    _discovery.onDeviceRemoved = () {
-      if (mounted) setState(() {});
-    };
   }
 
   void _removeConnectedDevice(String deviceName) {
-    _discovery.removeDevice(deviceName);
+    setState(() {
+      _discovery.ConnectedDevices.remove(deviceName);
+    });
   }
 
   @override
@@ -238,10 +237,10 @@ class _DevicesPageState extends State<DevicesPage> {
   }
 
   Future<void> _startDiscovery() async {
-    if (_isDiscovering) return; // Prevent multiple discovery processes
-    
     setState(() {
       _isDiscovering = true;
+      // Clear existing discovered devices when starting new discovery
+      _discovery.DiscoveredDevices.clear();
     });
 
     try {
@@ -537,7 +536,7 @@ class _FoldersPageState extends State<FoldersPage> {
                   title: Text(folder['name'] ?? ''),
                   subtitle: Text(folder['path'] ?? ''),
                   trailing: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
+                        icon: const Icon(Icons.delete, color: Colors.red),
                     onPressed: () => _removeFolder(index),
                   ),
                 );
