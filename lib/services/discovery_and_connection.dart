@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:path/path.dart' as path;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DiscoveryAndConnection {
   // Singleton pattern
@@ -93,12 +94,28 @@ class DiscoveryAndConnection {
   Future<void> connectToDevice(String deviceID) async {
     final remoteIp = DiscoveredDevices[deviceID];
     if (remoteIp == null) throw Exception('Device not found');
+    
+    // Only connect if we haven't already
+    if (ConnectedDevices.containsKey(deviceID)) {
+      print('[FILE SHARING] Already connected to $deviceID');
+      return;
+    }
+
     print('[FILE SHARING] Connecting to $remoteIp:$tcpPort');
     final socket = await Socket.connect(remoteIp, tcpPort);
     print('[FILE SHARING] Connected to $remoteIp:$tcpPort');
+    
+    // Add to connected devices
     ConnectedDevices[deviceID] = [remoteIp];
     outgoingSockets[deviceID] = socket;
-    // You can now use tcpSocket to send/receive files
+    
+    // Send our device info to establish bidirectional connection
+    final ourInfo = 'CONNECT_${deviceIp}_${deviceName}\n';
+    socket.add(utf8.encode(ourInfo));
+    await socket.flush();
+    
+    // Notify UI
+    onDeviceConnected?.call();
   }
 
   // Start a general TCP server for file sharing
@@ -106,26 +123,29 @@ class DiscoveryAndConnection {
     tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort, shared: true);
     print('[TCP SERVER] Listening on 0.0.0.0:$tcpPort');
     tcpServer!.listen((client) async {
-      print('[TCP SERVER] New client: \\${client.remoteAddress.address}');
-      // Try to find the device name from DiscoveredDevices
-      String? deviceName;
-      DiscoveredDevices.forEach((name, ip) {
-        if (ip == client.remoteAddress.address) {
-          deviceName = name;
-        }
-      });
-      // If not found, use the IP as the name
-      deviceName ??= client.remoteAddress.address;
-      // Add to ConnectedDevices if not already present
-      if (!ConnectedDevices.containsKey(deviceName)) {
-        ConnectedDevices[deviceName!] = [client.remoteAddress.address];
-        print('[TCP SERVER] Added $deviceName to ConnectedDevices');
-        onDeviceConnected?.call();
-      }
-      incomingSockets[deviceName!] = client;
-      // File receiving logic
+      print('[TCP SERVER] New client: ${client.remoteAddress.address}');
+      
+      // Handle initial connection info
       final stream = client.asBroadcastStream();
       final reader = utf8.decoder.bind(stream).transform(const LineSplitter());
+      
+      // Wait for the first line which should be connection info
+      final firstLine = await reader.first;
+      if (firstLine.startsWith('CONNECT_')) {
+        final parts = firstLine.split('_');
+        final remoteIp = parts[1];
+        final remoteName = parts[2];
+        
+        // Add to connected devices if not already present
+        if (!ConnectedDevices.containsKey(remoteName)) {
+          ConnectedDevices[remoteName] = [remoteIp];
+          print('[TCP SERVER] Added $remoteName to ConnectedDevices');
+          incomingSockets[remoteName] = client;
+          onDeviceConnected?.call();
+        }
+      }
+
+      // Continue with file receiving logic
       await for (final header in reader) {
         // Header: action|folderName|relativePath|size
         final parts = header.split('|');
@@ -134,8 +154,12 @@ class DiscoveryAndConnection {
         final folderName = parts[1];
         final relativePath = parts[2];
         final fileSize = int.tryParse(parts[3]) ?? 0;
-        final baseDir = await _getOrCreateFolder(folderName);
-        final filePath = path.join(baseDir, relativePath);
+        final localFolderPath = await _getLocalFolderPath(folderName);
+        if (localFolderPath == null) {
+          print('[TCP SERVER] No local folder mapped for "$folderName". Skipping file.');
+          continue;
+        }
+        final filePath = path.join(localFolderPath, relativePath);
         print('[TCP SERVER] Received $action for $relativePath');
         if (action == 'add' || action == 'modify') {
           // Receive file bytes
@@ -197,6 +221,22 @@ class DiscoveryAndConnection {
       await dir.create(recursive: true);
     }
     return dir.path;
+  }
+
+  // Look up the correct local folder path for a given shared folder name
+  Future<String?> _getLocalFolderPath(String folderName) async {
+    final prefs = await SharedPreferences.getInstance();
+    final foldersJson = prefs.getString('shared_folders');
+    if (foldersJson != null) {
+      final List<dynamic> decoded = jsonDecode(foldersJson);
+      for (final f in decoded) {
+        final map = Map<String, String>.from(f);
+        if (map['name'] == folderName) {
+          return map['path'];
+        }
+      }
+    }
+    return null;
   }
 }
 
