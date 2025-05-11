@@ -222,7 +222,7 @@ class _DevicesPageState extends State<DevicesPage> {
     try {
       await _discovery.StartBCast();
       if (!mounted) return;
-      
+
       await showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -248,16 +248,42 @@ class _DevicesPageState extends State<DevicesPage> {
                       title: Text(device.key),
                       subtitle: Text(device.value),
                       onTap: () async {
-                        Navigator.pop(context);
-                        await _discovery.Pairing(device.key);
-                        if (!mounted) return;
-                        setState(() {}); // Update paired devices
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Connected to ${device.key}'),
-                            backgroundColor: Colors.green,
+                        // Show progress dialog
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => const AlertDialog(
+                            content: Row(
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(width: 16),
+                                Text('Pairing...'),
+                              ],
+                            ),
                           ),
                         );
+                        try {
+                          await _discovery.Pairing(device.key);
+                          if (!mounted) return;
+                          setState(() {}); // Update paired devices
+                          Navigator.pop(context); // Close progress dialog
+                          Navigator.pop(context); // Close discovery dialog
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Connected to ${device.key}'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          Navigator.pop(context); // Close progress dialog
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Pairing failed: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       },
                     );
                   },
