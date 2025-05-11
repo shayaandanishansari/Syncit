@@ -123,12 +123,12 @@ class DiscoveryAndConnection {
     }
   }
 
-  Future<void> StopBCast() async {
+  void StopBCast() {
     _discoveryTimer?.cancel();
     _discoveryTimer = null;
     _cleanupTimer?.cancel();
     _cleanupTimer = null;
-    await udp_socket?.close();
+    udp_socket?.close();
     udp_socket = null;
   }
 
