@@ -4,6 +4,9 @@ import 'services/sync_service.dart';
 import 'package:path/path.dart' as path;
 import 'services/discovery_and_connection.dart';
 import 'services/file_watcher.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() {
   runApp(const SyncItApp());
@@ -405,11 +408,33 @@ class _FoldersPageState extends State<FoldersPage> {
   void initState() {
     super.initState();
     _syncService = SyncService();
+    _loadFolders();
+  }
+
+  Future<void> _loadFolders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final foldersJson = prefs.getString('shared_folders');
+    if (foldersJson != null) {
+      final List<dynamic> decoded = jsonDecode(foldersJson);
+      setState(() {
+        _folders.clear();
+        for (final f in decoded) {
+          _folders.add(Map<String, String>.from(f));
+          _syncService.addSyncPair(f['path'] ?? '', f['name'] ?? '');
+        }
+      });
+    }
+  }
+
+  Future<void> _saveFolders() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('shared_folders', jsonEncode(_folders));
   }
 
   void _addFolderDialog() async {
     String folderName = '';
     String folderPath = '';
+    final folderPathController = TextEditingController();
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -422,20 +447,38 @@ class _FoldersPageState extends State<FoldersPage> {
               decoration: const InputDecoration(labelText: 'Shared Folder Name'),
               onChanged: (value) => folderName = value,
             ),
-            TextField(
-              decoration: const InputDecoration(labelText: 'Local Folder Path'),
-              onChanged: (value) => folderPath = value,
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: folderPathController,
+                    readOnly: true,
+                    decoration: const InputDecoration(labelText: 'Local Folder Path'),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.folder_open),
+                  onPressed: () async {
+                    String? selected = await FilePicker.platform.getDirectoryPath();
+                    if (selected != null) {
+                      folderPath = selected;
+                      folderPathController.text = selected;
+                    }
+                  },
+                ),
+              ],
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               if (folderName.isNotEmpty && folderPath.isNotEmpty) {
                 setState(() {
                   _folders.add({'name': folderName, 'path': folderPath});
                   _syncService.addSyncPair(folderPath, folderName);
                 });
+                await _saveFolders();
                 Navigator.pop(context);
               }
             },
@@ -450,12 +493,13 @@ class _FoldersPageState extends State<FoldersPage> {
     );
   }
 
-  void _removeFolder(int index) {
+  void _removeFolder(int index) async {
     setState(() {
       final folder = _folders[index];
       _syncService.removeSyncPair(folder['path'] ?? '');
       _folders.removeAt(index);
     });
+    await _saveFolders();
   }
 
   @override
