@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:path';
+import 'package:path/path.dart' as path;
 
 class DiscoveryAndConnection {
   final int port = 1234;
