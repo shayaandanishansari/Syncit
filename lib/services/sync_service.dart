@@ -82,6 +82,8 @@ class SyncService {
       folderPath: sourcePath,
     );
 
+    print('[WATCHER] Watching folder: $sourcePath');
+
     watcher.onFileEvent = (event) {
       if (!_isPaused) {
         _handleFileEvent(event);

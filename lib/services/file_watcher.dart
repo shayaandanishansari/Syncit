@@ -30,6 +30,8 @@ class FileWatcher {
     final filePath = event.path;
     final fileName = path.basename(filePath);
 
+    print('[WATCHER] Event: ${event.type} on $filePath');
+
     switch (event.type) {
       case ChangeType.ADD:
         _watchedFiles.add(filePath);
