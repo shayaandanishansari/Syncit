@@ -337,7 +337,6 @@ class _DevicesPageState extends State<DevicesPage> {
   @override
   Widget build(BuildContext context) {
     final connectedDevices = _discovery.ConnectedDevices.entries.toList();
-    final discovered = _discovery.DiscoveredDevices;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.lightBlue,
@@ -357,7 +356,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 final entry = connectedDevices[index];
                 final name = entry.key;
                 final ip = entry.value[0];
-                final online = discovered.containsValue(ip);
+                final online = _discovery.ConnectedDevices.containsKey(name);
                 return ListTile(
                   leading: const Icon(Icons.computer),
                   title: Text(name),

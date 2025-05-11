@@ -94,8 +94,22 @@ class DiscoveryAndConnection {
   Future<void> startTCPServer() async {
     tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort);
     print('[TCP SERVER] Listening on 0.0.0.0:$tcpPort');
-    tcpServer!.listen((client) {
+    tcpServer!.listen((client) async {
       print('[TCP SERVER] New client: \\${client.remoteAddress.address}');
+      // Try to find the device name from DiscoveredDevices
+      String? deviceName;
+      DiscoveredDevices.forEach((name, ip) {
+        if (ip == client.remoteAddress.address) {
+          deviceName = name;
+        }
+      });
+      // If not found, use the IP as the name
+      deviceName ??= client.remoteAddress.address;
+      // Add to ConnectedDevices if not already present
+      if (!ConnectedDevices.containsKey(deviceName)) {
+        ConnectedDevices[deviceName!] = [client.remoteAddress.address];
+        print('[TCP SERVER] Added $deviceName to ConnectedDevices');
+      }
       // You can now use 'client' to receive files
     });
   }
