@@ -150,34 +150,52 @@ class DiscoveryAndConnection {
 
       // Continue with file receiving logic
       await for (final header in reader) {
+        print('[TCP SERVER] Received header: $header');
         // Header: action|folderName|relativePath|size
         final parts = header.split('|');
-        if (parts.length < 4) continue;
+        if (parts.length < 4) {
+          print('[TCP SERVER] Invalid header format: $header');
+          continue;
+        }
         final action = parts[0];
         final folderName = parts[1];
         final relativePath = parts[2];
         final fileSize = int.tryParse(parts[3]) ?? 0;
+        
+        print('[TCP SERVER] Processing file:');
+        print('  Action: $action');
+        print('  Folder: $folderName');
+        print('  Path: $relativePath');
+        print('  Size: $fileSize bytes');
+
         final localFolderPath = await _getLocalFolderPath(folderName);
         if (localFolderPath == null) {
-          print('[TCP SERVER] No local folder mapped for "$folderName". Skipping file.');
+          print('[TCP SERVER] ERROR: No local folder mapped for "$folderName". Skipping file.');
           continue;
         }
+        
         final filePath = path.join(localFolderPath, relativePath);
-        print('[TCP SERVER] Received $action for $relativePath');
+        print('[TCP SERVER] Target path: $filePath');
+
         if (action == 'add' || action == 'modify') {
           // Receive file bytes
           final file = File(filePath);
           await file.parent.create(recursive: true);
           final sink = file.openWrite();
           int received = 0;
-          print('[TCP SERVER] Receiving file: $filePath ($fileSize bytes)');
+          print('[TCP SERVER] Starting file receive...');
+          
           await for (final chunk in stream) {
             sink.add(chunk);
             received += chunk.length;
+            if (received % 1024 == 0) { // Log progress every 1KB
+              print('[TCP SERVER] Received ${received}/${fileSize} bytes (${(received/fileSize*100).toStringAsFixed(1)}%)');
+            }
             if (received >= fileSize) break;
           }
+          
           await sink.close();
-          print('[TCP SERVER] File written: $filePath');
+          print('[TCP SERVER] File write complete: $filePath');
         } else if (action == 'delete') {
           final file = File(filePath);
           if (await file.exists()) {
