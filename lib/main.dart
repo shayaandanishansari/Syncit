@@ -202,6 +202,12 @@ class _DevicesPageState extends State<DevicesPage> {
   final DiscoveryAndConnection _discovery = DiscoveryAndConnection();
   bool _isDiscovering = false;
 
+  void _removePairedDevice(String deviceName) {
+    setState(() {
+      _discovery.PairedDevices.remove(deviceName);
+    });
+  }
+
   @override
   void dispose() {
     _discovery.StopBCast();
@@ -217,7 +223,7 @@ class _DevicesPageState extends State<DevicesPage> {
       await _discovery.StartBCast();
       if (!mounted) return;
       
-      showDialog(
+      await showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Available Devices'),
@@ -245,6 +251,7 @@ class _DevicesPageState extends State<DevicesPage> {
                         Navigator.pop(context);
                         await _discovery.Pairing(device.key);
                         if (!mounted) return;
+                        setState(() {}); // Update paired devices
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text('Connected to ${device.key}'),
@@ -272,6 +279,10 @@ class _DevicesPageState extends State<DevicesPage> {
           ],
         ),
       );
+      _discovery.StopBCast();
+      setState(() {
+        _isDiscovering = false;
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -288,6 +299,8 @@ class _DevicesPageState extends State<DevicesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pairedDevices = _discovery.PairedDevices.entries.toList();
+    final discovered = _discovery.DiscoveredDevices;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.lightBlue,
@@ -295,11 +308,39 @@ class _DevicesPageState extends State<DevicesPage> {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       drawer: const AppDrawer(),
-      body: Center(
-        child: _isDiscovering
-            ? const CircularProgressIndicator()
-            : const Text('No devices added. Click the + button to add one'),
-      ),
+      body: pairedDevices.isEmpty
+          ? Center(
+              child: _isDiscovering
+                  ? const CircularProgressIndicator()
+                  : const Text('No devices added. Click the + button to add one'),
+            )
+          : ListView.builder(
+              itemCount: pairedDevices.length,
+              itemBuilder: (context, index) {
+                final entry = pairedDevices[index];
+                final name = entry.key;
+                final ip = entry.value[0];
+                final online = discovered.containsValue(ip);
+                return ListTile(
+                  leading: const Icon(Icons.computer),
+                  title: Text(name),
+                  subtitle: Text(ip),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Checkbox(
+                        value: online,
+                        onChanged: null,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _removePairedDevice(name),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
       floatingActionButton: FloatingActionButton(
         onPressed: _isDiscovering ? null : _startDiscovery,
         child: const Icon(Icons.add),

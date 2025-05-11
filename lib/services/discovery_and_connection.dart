@@ -25,7 +25,7 @@ class DiscoveryAndConnection {
       includeLinkLocal: false,
     );
     for (final iface in interfaces) {
-      if (iface.name.toLowerCase() == 'wi-fi') {
+      if (iface.name.toLowerCase() == 'wi-fi' || iface.name.toLowerCase() == 'wifi') {
         return iface.addresses
             .firstWhere((a) => a.type == InternetAddressType.IPv4)
             .address;
@@ -51,6 +51,7 @@ class DiscoveryAndConnection {
         final dg = udp_socket!.receive();
         if (dg == null) return;
         final msg = utf8.decode(dg.data);
+        print('[UDP RECEIVED] from \\${dg.address.address}: $msg');
         if (!msg.startsWith('DISCOVERY_SYNCIT_')) return;
         final p = msg.split('_');
         final ip = p[2];
@@ -63,6 +64,7 @@ class DiscoveryAndConnection {
 
     _timer = Timer.periodic(Duration(seconds: 2), (_) {
       final ping = 'DISCOVERY_SYNCIT_${deviceIp}_${deviceName}';
+      print('[UDP SENT] to $bcastIp: $ping');
       udp_socket!.send(
         utf8.encode(ping),
         InternetAddress(bcastIp),
@@ -88,12 +90,14 @@ class DiscoveryAndConnection {
       InternetAddress(remoteIp),
       port,
     );
+    print('[UDP SENT] to $remoteIp: $req');
 
     await for (final event in udp_socket!) {
       if (event != RawSocketEvent.read) continue;
       final dg = udp_socket!.receive();
       if (dg == null) continue;
       final msg = utf8.decode(dg.data);
+      print('[UDP RECEIVED] from \\${dg.address.address}: $msg');
       if (msg == 'PAIR_OK_$pin') {
         PairedDevices[deviceID] = [remoteIp, pin.toString()];
         await SwitchToTCPConnection(deviceID);
@@ -107,12 +111,14 @@ class DiscoveryAndConnection {
     if (info == null) return;
     final ip = info[0];
     tcpSocket = await Socket.connect(ip, tcpPort);
+    print('[TCP CONNECT] Connected to $ip:$tcpPort');
   }
 
   Future<void> startTCPServer() async {
     tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort);
+    print('[TCP SERVER] Listening on 0.0.0.0:$tcpPort');
     tcpServer!.listen((client) {
-      print('New TCP client: \\${client.remoteAddress.address}');
+      print('[TCP SERVER] New client: \\${client.remoteAddress.address}');
     });
   }
 }
