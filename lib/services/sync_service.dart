@@ -1,0 +1,221 @@
+import 'dart:io';
+import 'package:path/path.dart' as path;
+import 'package:watcher/watcher.dart' hide FileWatcher;
+import 'file_watcher.dart';
+
+enum SyncStatus {
+  idle,
+  syncing,
+  error,
+  paused
+}
+
+class SyncError {
+  final String message;
+  final String? filePath;
+  final DateTime timestamp;
+  final dynamic originalError;
+
+  SyncError(this.message, {this.filePath, this.originalError}) : timestamp = DateTime.now();
+}
+
+class SyncService {
+  final Map<String, FileWatcher> _watchers = {};
+  final Map<String, String> _syncPairs = {}; // source -> destination mapping
+  final Map<String, SyncStatus> _syncStatus = {};
+  final List<SyncError> _errors = [];
+  bool _isPaused = false;
+  
+  // Callbacks for UI updates
+  void Function(String path, SyncStatus status)? onStatusChanged;
+  void Function(SyncError error)? onError;
+  void Function(String sourcePath, String destPath)? onSyncComplete;
+
+  void addSyncPair(String sourcePath, String destinationPath) {
+    if (!_syncPairs.containsKey(sourcePath)) {
+      _syncPairs[sourcePath] = destinationPath;
+      _syncStatus[sourcePath] = SyncStatus.idle;
+      _startWatching(sourcePath);
+    }
+  }
+
+  void removeSyncPair(String sourcePath) {
+    if (_syncPairs.containsKey(sourcePath)) {
+      _stopWatching(sourcePath);
+      _syncPairs.remove(sourcePath);
+      _syncStatus.remove(sourcePath);
+    }
+  }
+
+  void pauseSync() {
+    _isPaused = true;
+    _updateAllStatuses(SyncStatus.paused);
+  }
+
+  void resumeSync() {
+    _isPaused = false;
+    _updateAllStatuses(SyncStatus.idle);
+  }
+
+  void _updateAllStatuses(SyncStatus status) {
+    for (final path in _syncStatus.keys) {
+      _updateStatus(path, status);
+    }
+  }
+
+  void _updateStatus(String path, SyncStatus status) {
+    _syncStatus[path] = status;
+    onStatusChanged?.call(path, status);
+  }
+
+  void _startWatching(String sourcePath) {
+    final watcher = FileWatcher(
+      folderName: path.basename(sourcePath),
+      folderPath: sourcePath,
+    );
+
+    watcher.onFileEvent = (event) {
+      if (!_isPaused) {
+        _handleFileEvent(event);
+      }
+    };
+
+    watcher.start_listening();
+    _watchers[sourcePath] = watcher;
+  }
+
+  void _stopWatching(String sourcePath) {
+    final watcher = _watchers[sourcePath];
+    if (watcher != null) {
+      watcher.close();
+      _watchers.remove(sourcePath);
+    }
+  }
+
+  Future<void> _handleFileEvent(WatchEvent event) async {
+    final sourcePath = event.path;
+    final sourceDir = path.dirname(sourcePath);
+    final destinationPath = _syncPairs[sourceDir];
+    
+    if (destinationPath == null) return;
+
+    _updateStatus(sourceDir, SyncStatus.syncing);
+
+    final relativePath = path.relative(sourcePath, from: sourceDir);
+    final targetPath = path.join(destinationPath, relativePath);
+
+    try {
+      switch (event.type) {
+        case ChangeType.ADD:
+        case ChangeType.MODIFY:
+          await _copyFileWithRetry(sourcePath, targetPath);
+          break;
+        case ChangeType.REMOVE:
+          await _deleteFileWithRetry(targetPath);
+          break;
+      }
+      onSyncComplete?.call(sourcePath, targetPath);
+    } catch (e) {
+      final error = SyncError(
+        'Failed to sync file: ${path.basename(sourcePath)}',
+        filePath: sourcePath,
+        originalError: e,
+      );
+      _errors.add(error);
+      onError?.call(error);
+    } finally {
+      _updateStatus(sourceDir, SyncStatus.idle);
+    }
+  }
+
+  Future<void> _copyFileWithRetry(String source, String destination, {int maxRetries = 3}) async {
+    int attempts = 0;
+    while (attempts < maxRetries) {
+      try {
+        final file = File(source);
+        if (await file.exists()) {
+          final targetFile = File(destination);
+          await targetFile.parent.create(recursive: true);
+          
+          // Check available space
+          final fileSize = await file.length();
+          final targetDir = targetFile.parent;
+          final availableSpace = await _getAvailableSpace(targetDir.path);
+          if (availableSpace < fileSize) {
+            throw SyncError('Insufficient disk space');
+          }
+
+          // Copy with verification
+          await file.copy(destination);
+          
+          // Verify copy
+          final sourceHash = await _getFileHash(source);
+          final destHash = await _getFileHash(destination);
+          if (sourceHash != destHash) {
+            throw SyncError('File integrity check failed');
+          }
+          
+          return;
+        }
+      } catch (e) {
+        attempts++;
+        if (attempts == maxRetries) rethrow;
+        await Future.delayed(Duration(seconds: 1 * attempts));
+      }
+    }
+  }
+
+  Future<int> _getAvailableSpace(String path) async {
+    try {
+      final result = await Process.run('powershell', [
+        '-Command',
+        r'(Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Root -eq "' + path.substring(0, 2) + r'\"}).Free'
+      ]);
+      if (result.exitCode == 0) {
+        return int.tryParse(result.stdout.toString().trim()) ?? 0;
+      }
+    } catch (e) {
+      print('Error getting available space: $e');
+    }
+    return 0;
+  }
+
+  Future<void> _deleteFileWithRetry(String path, {int maxRetries = 3}) async {
+    int attempts = 0;
+    while (attempts < maxRetries) {
+      try {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+          return;
+        }
+      } catch (e) {
+        attempts++;
+        if (attempts == maxRetries) rethrow;
+        await Future.delayed(Duration(seconds: 1 * attempts));
+      }
+    }
+  }
+
+  Future<String> _getFileHash(String filePath) async {
+    final file = File(filePath);
+    final bytes = await file.readAsBytes();
+    // Simple hash for now - could be replaced with more robust hashing
+    return bytes.length.toString();
+  }
+
+  Future<void> dispose() async {
+    for (final watcher in _watchers.values) {
+      await watcher.close();
+    }
+    _watchers.clear();
+    _syncPairs.clear();
+    _syncStatus.clear();
+    _errors.clear();
+  }
+
+  Map<String, String> get syncPairs => Map.unmodifiable(_syncPairs);
+  Map<String, SyncStatus> get syncStatus => Map.unmodifiable(_syncStatus);
+  List<SyncError> get errors => List.unmodifiable(_errors);
+  bool get isPaused => _isPaused;
+} 
