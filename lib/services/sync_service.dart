@@ -44,14 +44,29 @@ class SyncService {
       _syncPairs[sourcePath] = destinationPath;
       _syncStatus[sourcePath] = SyncStatus.idle;
       _startWatching(sourcePath);
+      
+      // Also watch the destination folder for changes
+      if (!_syncPairs.containsKey(destinationPath)) {
+        _syncPairs[destinationPath] = sourcePath;
+        _syncStatus[destinationPath] = SyncStatus.idle;
+        _startWatching(destinationPath);
+      }
     }
   }
 
   void removeSyncPair(String sourcePath) {
     if (_syncPairs.containsKey(sourcePath)) {
       _stopWatching(sourcePath);
+      final destPath = _syncPairs[sourcePath];
       _syncPairs.remove(sourcePath);
       _syncStatus.remove(sourcePath);
+      
+      // Also remove the reverse mapping
+      if (destPath != null && _syncPairs.containsKey(destPath)) {
+        _stopWatching(destPath);
+        _syncPairs.remove(destPath);
+        _syncStatus.remove(destPath);
+      }
     }
   }
 
@@ -126,7 +141,7 @@ class SyncService {
             print('[SYNC] Sending file change to connected devices...');
             await discovery!.sendFileChange(
               action: event.type == ChangeType.ADD ? 'add' : 'modify',
-              folderName: destinationPath,
+              folderName: path.basename(sourceDir),
               relativePath: relativePath,
               filePath: sourcePath,
             );
@@ -140,7 +155,7 @@ class SyncService {
             print('[SYNC] Sending delete command to connected devices...');
             await discovery!.sendFileChange(
               action: 'delete',
-              folderName: destinationPath,
+              folderName: path.basename(sourceDir),
               relativePath: relativePath,
             );
             print('[SYNC] Delete command sent.');
