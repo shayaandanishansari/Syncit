@@ -201,6 +201,55 @@ class DevicesPage extends StatefulWidget {
 class _DevicesPageState extends State<DevicesPage> {
   final DiscoveryAndConnection _discovery = DiscoveryAndConnection();
   bool _isDiscovering = false;
+  String? _currentPin; // For showing PIN on server
+
+  @override
+  void initState() {
+    super.initState();
+    // Show PIN dialog on server when pairing is requested
+    _discovery.onShowPin = (pin) {
+      setState(() {
+        _currentPin = pin;
+      });
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Pairing Request'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Enter this PIN on the other device:'),
+              const SizedBox(height: 16),
+              Text(pin, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                setState(() {
+                  _currentPin = null;
+                });
+              },
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    };
+    // Show pairing result on client
+    _discovery.onPairingResult = (success, message) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    };
+    // Start the pairing server
+    _discovery.startPairingServer();
+  }
 
   void _removePairedDevice(String deviceName) {
     setState(() {
@@ -212,6 +261,33 @@ class _DevicesPageState extends State<DevicesPage> {
   void dispose() {
     _discovery.StopBCast();
     super.dispose();
+  }
+
+  Future<String> _promptForPinDialog() async {
+    String enteredPin = '';
+    return await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter PIN'),
+        content: TextField(
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          onChanged: (value) => enteredPin = value,
+          decoration: const InputDecoration(
+            labelText: 'PIN',
+            hintText: 'Enter the PIN from the other device',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, enteredPin),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    ) ?? '';
   }
 
   Future<void> _startDiscovery() async {
@@ -263,26 +339,14 @@ class _DevicesPageState extends State<DevicesPage> {
                           ),
                         );
                         try {
-                          await _discovery.Pairing(device.key);
+                          await _discovery.Pairing(device.key, _promptForPinDialog);
                           if (!mounted) return;
                           setState(() {}); // Update paired devices
                           Navigator.pop(context); // Close progress dialog
                           Navigator.pop(context); // Close discovery dialog
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Connected to ${device.key}'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
                         } catch (e) {
                           if (!mounted) return;
                           Navigator.pop(context); // Close progress dialog
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Pairing failed: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
                         }
                       },
                     );

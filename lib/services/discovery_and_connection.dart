@@ -21,19 +21,23 @@ class DiscoveryAndConnection {
   ServerSocket? tcpServer;
   ServerSocket? pairingServer;
 
+  // Callbacks for UI
+  void Function(String pin)? onShowPin; // Called to display PIN on server
+  void Function(bool success, String message)? onPairingResult; // Called to show result on client
+
   Future<String> getWifiIP() async {
     final interfaces = await NetworkInterface.list(
       includeLoopback: false,
       includeLinkLocal: false,
     );
     for (final iface in interfaces) {
-      for (final addr in iface.addresses) {
-        if (addr.type == InternetAddressType.IPv4) {
-          return addr.address;
-        }
+      if (iface.name.toLowerCase() == 'wi-fi' || iface.name.toLowerCase() == 'wifi') {
+        return iface.addresses
+            .firstWhere((a) => a.type == InternetAddressType.IPv4)
+            .address;
       }
     }
-    throw Exception('No suitable IPv4 address found. Please check your network connection.');
+    return '0.0.0.0';
   }
 
   Future<void> StartBCast() async {
@@ -91,12 +95,25 @@ class DiscoveryAndConnection {
         final data = await utf8.decoder.bind(client).first;
         print('[PAIRING SERVER] Received: $data');
         if (data.startsWith('PAIR_REQ_')) {
-          // Accept all pair requests for now
-          final pin = Random().nextInt(900000) + 100000;
-          final resp = 'PAIR_OK_$pin';
-          client.write(resp);
+          // Step 1: Generate and show PIN
+          final pin = (Random().nextInt(900000) + 100000).toString();
+          onShowPin?.call(pin); // Show PIN on server UI
+          client.write('PIN:$pin');
           await client.flush();
-          print('[PAIRING SERVER] Sent: $resp');
+          print('[PAIRING SERVER] Sent PIN: $pin');
+
+          // Step 2: Wait for client to send back entered PIN
+          final entered = await utf8.decoder.bind(client).first;
+          print('[PAIRING SERVER] Received entered PIN: $entered');
+          if (entered == pin) {
+            client.write('PAIR_OK');
+            await client.flush();
+            print('[PAIRING SERVER] Pairing successful!');
+          } else {
+            client.write('PAIR_FAIL');
+            await client.flush();
+            print('[PAIRING SERVER] Pairing failed: wrong PIN');
+          }
         } else {
           client.write('PAIR_FAIL');
           await client.flush();
@@ -110,25 +127,38 @@ class DiscoveryAndConnection {
     });
   }
 
-  // Pairing via TCP
-  Future<void> Pairing(String deviceID) async {
+  // Pairing via TCP with PIN entry
+  Future<void> Pairing(String deviceID, Future<String> Function() promptForPin) async {
     final remoteIp = DiscoveredDevices[deviceID];
     if (remoteIp == null) throw Exception('Device not found');
-    final pin = Random().nextInt(900000) + 100000;
-    final req = 'PAIR_REQ_${deviceIp}_$pin';
     print('[TCP PAIRING] Connecting to $remoteIp:$pairingPort');
     final socket = await Socket.connect(remoteIp, pairingPort).timeout(const Duration(seconds: 5));
-    socket.write(req);
+    socket.write('PAIR_REQ_');
     await socket.flush();
-    print('[TCP PAIRING] Sent: $req');
+    print('[TCP PAIRING] Sent: PAIR_REQ_');
     final resp = await utf8.decoder.bind(socket).first;
     print('[TCP PAIRING] Received: $resp');
+    if (!resp.startsWith('PIN:')) {
+      await socket.close();
+      onPairingResult?.call(false, 'Failed to get PIN from server');
+      throw Exception('Failed to get PIN from server');
+    }
+    final pin = resp.substring(4);
+    // Prompt user to enter the PIN shown on the other device
+    final enteredPin = await promptForPin();
+    socket.write(enteredPin);
+    await socket.flush();
+    print('[TCP PAIRING] Sent entered PIN: $enteredPin');
+    final result = await utf8.decoder.bind(socket).first;
+    print('[TCP PAIRING] Received: $result');
     await socket.close();
-    if (resp.startsWith('PAIR_OK_')) {
-      PairedDevices[deviceID] = [remoteIp, pin.toString()];
+    if (result == 'PAIR_OK') {
+      PairedDevices[deviceID] = [remoteIp, pin];
+      onPairingResult?.call(true, 'Pairing successful!');
       print('[TCP PAIRING] Pairing successful!');
     } else {
-      throw Exception('Pairing failed: $resp');
+      onPairingResult?.call(false, 'Pairing failed: wrong PIN');
+      throw Exception('Pairing failed: wrong PIN');
     }
   }
 
