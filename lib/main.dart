@@ -215,16 +215,20 @@ class _DevicesPageState extends State<DevicesPage> {
     _discovery.startTCPServer();
     // Start discovery automatically
     _startDiscovery();
-    // Refresh UI when a device connects
+    // Set up UI update callbacks
     _discovery.onDeviceConnected = () {
+      if (mounted) setState(() {});
+    };
+    _discovery.onDeviceDiscovered = () {
+      if (mounted) setState(() {});
+    };
+    _discovery.onDeviceRemoved = () {
       if (mounted) setState(() {});
     };
   }
 
   void _removeConnectedDevice(String deviceName) {
-    setState(() {
-      _discovery.ConnectedDevices.remove(deviceName);
-    });
+    _discovery.removeDevice(deviceName);
   }
 
   @override
@@ -234,6 +238,8 @@ class _DevicesPageState extends State<DevicesPage> {
   }
 
   Future<void> _startDiscovery() async {
+    if (_isDiscovering) return; // Prevent multiple discovery processes
+    
     setState(() {
       _isDiscovering = true;
     });
