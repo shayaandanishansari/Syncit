@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path/path.dart' as path;
 import '../services/sync_service.dart';
+import '../services/sync_service_notifier.dart';
 import '../services/discovery_and_connection.dart';
 import '../services/settings_service.dart';
 import 'app_drawer.dart';

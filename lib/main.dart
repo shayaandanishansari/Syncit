@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'services/settings_service.dart';
+import 'services/sync_service_notifier.dart';
 import 'pages/home_page.dart';
 import 'pages/devices_page.dart';
 import 'pages/folders_page.dart';
